@@ -359,6 +359,7 @@ impl UndoBehavior {
         match (previous, self) {
             // Never start an undo set with cursor movement
             (_, UB::MoveCursor) => false,
+            (_, UB::UndoRedo) => false,
             (UB::HistoryNavigation, UB::HistoryNavigation) => false,
             // When inserting/deleting repeatedly, each undo set should encompass
             // inserting/deleting a complete word and the associated whitespace

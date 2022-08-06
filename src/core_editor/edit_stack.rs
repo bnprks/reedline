@@ -1,7 +1,11 @@
 #[derive(Debug, PartialEq, Eq)]
+
+/// Represent a list of pending undos and redos.
+/// Note: Does not track the active state. The caller must track the active
+/// state, which helps to minimize clone operations
 pub struct EditStack<T> {
-    internal_list: Vec<T>,
-    index: usize,
+    undo_list: Vec<T>,
+    redo_list: Vec<T>,
 }
 
 impl<T> EditStack<T> {
@@ -10,8 +14,8 @@ impl<T> EditStack<T> {
         T: Default,
     {
         EditStack {
-            internal_list: vec![T::default()],
-            index: 0,
+            undo_list: Vec::new(),
+            redo_list: Vec::new(),
         }
     }
 }
@@ -21,43 +25,35 @@ where
     T: Default + Clone + Send,
 {
     /// Go back one point in the undo stack. If present on first edit do nothing
-    pub(super) fn undo(&mut self) -> &T {
-        self.index = if self.index == 0 { 0 } else { self.index - 1 };
-        &self.internal_list[self.index]
+    /// Updates the current_state parameter in-place if an undo is possible
+    pub(super) fn undo(&mut self, current_state: &mut T) {
+        if let Some(prev_state) = self.undo_list.pop() {
+            self.redo_list
+                .push(std::mem::replace(current_state, prev_state));
+        }
     }
 
     /// Go forward one point in the undo stack. If present on the last edit do nothing
-    pub(super) fn redo(&mut self) -> &T {
-        self.index = if self.index == self.internal_list.len() - 1 {
-            self.index
-        } else {
-            self.index + 1
-        };
-        &self.internal_list[self.index]
+    /// Updates the current_state parameter in-place if a redo is possible
+    pub(super) fn redo(&mut self, current_state: &mut T) {
+        if let Some(next_state) = self.redo_list.pop() {
+            self.undo_list
+                .push(std::mem::replace(current_state, next_state));
+        }
     }
 
     /// Insert a new entry to the undo stack.
     /// NOTE: (IMP): If we have hit undo a few times then discard all the other values that come
     /// after the current point
-    pub(super) fn insert(&mut self, value: T) {
-        if self.index < self.internal_list.len() - 1 {
-            self.internal_list.resize_with(self.index + 1, || {
-                panic!("Impossible state reached: Bug in UndoStack logic")
-            });
-        }
-        self.internal_list.push(value);
-        self.index += 1;
+    pub(super) fn insert(&mut self, current_state: T) {
+        self.undo_list.push(current_state);
+        self.redo_list.clear();
     }
 
     /// Reset the stack to the initial state
     pub(super) fn reset(&mut self) {
-        self.index = 0;
-        self.internal_list = vec![T::default()];
-    }
-
-    /// Return the entry currently being pointed to
-    pub(super) fn current(&mut self) -> &T {
-        &self.internal_list[self.index]
+        self.undo_list.clear();
+        self.redo_list.clear();
     }
 }
 
@@ -67,39 +63,47 @@ mod test {
     use pretty_assertions::assert_eq;
     use rstest::rstest;
 
-    fn edit_stack<T>(values: &[T], index: usize) -> EditStack<T>
+    fn edit_stack<T>(undo_states: Vec<T>, redo_states: Vec<T>) -> EditStack<T>
     where
         T: Clone,
     {
         EditStack {
-            internal_list: values.to_vec(),
-            index,
+            undo_list: undo_states,
+            redo_list: redo_states,
         }
     }
 
     #[rstest]
-    #[case(edit_stack(&[1, 2, 3][..], 2), 2)]
-    #[case(edit_stack(&[1][..], 0), 1)]
-    fn undo_works(#[case] stack: EditStack<isize>, #[case] value_after_undo: isize) {
+    #[case(edit_stack(vec![1, 2], vec![]), 3, 2)]
+    #[case(edit_stack(vec![], vec![]), 1, 1)]
+    fn undo_works(
+        #[case] stack: EditStack<isize>,
+        #[case] mut current: isize,
+        #[case] value_after_undo: isize,
+    ) {
         let mut stack = stack;
 
-        let value = stack.undo();
-        assert_eq!(*value, value_after_undo);
+        stack.undo(&mut current);
+        assert_eq!(current, value_after_undo);
     }
 
     #[rstest]
-    #[case(edit_stack(&[1, 2, 3][..], 1), 3)]
-    #[case(edit_stack(&[1][..], 0), 1)]
-    fn redo_works(#[case] stack: EditStack<isize>, #[case] value_after_undo: isize) {
+    #[case(edit_stack(vec![1], vec![3]), 2, 3)]
+    #[case(edit_stack(vec![], vec![]), 1, 1)]
+    fn redo_works(
+        #[case] stack: EditStack<isize>,
+        #[case] mut current: isize,
+        #[case] value_after_undo: isize,
+    ) {
         let mut stack = stack;
 
-        let value = stack.redo();
-        assert_eq!(*value, value_after_undo);
+        stack.redo(&mut current);
+        assert_eq!(current, value_after_undo);
     }
 
     #[rstest]
-    #[case(edit_stack(&[1, 2, 3][..], 1), 4, edit_stack(&[1, 2, 4], 2))]
-    #[case(edit_stack(&[1, 2, 3][..], 2), 3, edit_stack(&[1, 2, 3, 3], 3))]
+    #[case(edit_stack(vec![1, 2], vec![3]), 4, edit_stack(vec![1, 2, 4], vec![]))]
+    #[case(edit_stack(vec![1, 2, 3], vec![]), 3, edit_stack(vec![1, 2, 3, 3], vec![]))]
     fn insert_works(
         #[case] old_stack: EditStack<isize>,
         #[case] value_to_insert: isize,

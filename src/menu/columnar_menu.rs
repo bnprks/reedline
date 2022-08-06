@@ -483,19 +483,23 @@ impl Menu for ColumnarMenu {
             let extends_input = matching.starts_with(&editor.get_buffer()[span.start..span.end]);
 
             if !matching.is_empty() && extends_input {
-                let mut line_buffer = editor.line_buffer().clone();
-                line_buffer.replace_range(span.start..span.end, matching);
-
                 let offset = if matching.len() < (span.end - span.start) {
-                    line_buffer
+                    editor
+                        .line_buffer()
                         .insertion_point()
                         .saturating_sub((span.end - span.start) - matching.len())
                 } else {
-                    line_buffer.insertion_point() + matching.len() - (span.end - span.start)
+                    editor.line_buffer().insertion_point() + matching.len()
+                        - (span.end - span.start)
                 };
 
-                line_buffer.set_insertion_point(offset);
-                editor.set_line_buffer(line_buffer, UndoBehavior::CreateUndoPoint);
+                editor.edit_buffer(
+                    |lb| {
+                        lb.replace_range(span.start..span.end, matching);
+                        lb.set_insertion_point(offset);
+                    },
+                    UndoBehavior::CreateUndoPoint,
+                );
 
                 // The values need to be updated because the spans need to be
                 // recalculated for accurate replacement in the string
@@ -663,13 +667,16 @@ impl Menu for ColumnarMenu {
             if append_whitespace {
                 value.push(' ');
             }
-            let mut line_buffer = editor.line_buffer().clone();
-            line_buffer.replace_range(start..end, &value);
+            let offset = editor.line_buffer().insertion_point()
+                + value.len().saturating_sub(end.saturating_sub(start));
 
-            let mut offset = line_buffer.insertion_point();
-            offset += value.len().saturating_sub(end.saturating_sub(start));
-            line_buffer.set_insertion_point(offset);
-            editor.set_line_buffer(line_buffer, UndoBehavior::CreateUndoPoint);
+            editor.edit_buffer(
+                |lb| {
+                    lb.replace_range(start..end, &value);
+                    lb.set_insertion_point(offset);
+                },
+                UndoBehavior::CreateUndoPoint,
+            );
         }
     }
 

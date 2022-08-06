@@ -480,13 +480,16 @@ impl Menu for ListMenu {
             if append_whitespace {
                 value.push(' ');
             }
-            let mut line_buffer = editor.line_buffer().clone();
-            line_buffer.replace_range(start..end, &value);
+            let offset = editor.line_buffer().insertion_point()
+                + value.len().saturating_sub(end.saturating_sub(start));
 
-            let mut offset = line_buffer.insertion_point();
-            offset += value.len().saturating_sub(end.saturating_sub(start));
-            line_buffer.set_insertion_point(offset);
-            editor.set_line_buffer(line_buffer, UndoBehavior::CreateUndoPoint);
+            editor.edit_buffer(
+                |lb| {
+                    lb.replace_range(start..end, &value);
+                    lb.set_insertion_point(offset);
+                },
+                UndoBehavior::CreateUndoPoint,
+            );
         }
     }
 

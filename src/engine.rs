@@ -1069,8 +1069,12 @@ impl Reedline {
                         .set_buffer(buffer_to_paint, UndoBehavior::HistoryNavigation);
                 } else {
                     // Hack
-                    self.editor
-                        .set_line_buffer(original, UndoBehavior::HistoryNavigation);
+                    self.editor.edit_buffer(
+                        |lb| {
+                            *lb = original;
+                        },
+                        UndoBehavior::HistoryNavigation,
+                    );
                 }
             }
             HistoryNavigationQuery::PrefixSearch(prefix) => {
